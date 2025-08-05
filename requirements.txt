@@ -1,0 +1,66 @@
+# Core ML/AI frameworks
+torch>=2.0.0
+torchvision>=0.15.0
+numpy>=1.21.0
+pandas>=1.5.0
+scikit-learn>=1.2.0
+
+# Deep Learning utilities
+pytorch-lightning>=2.0.0
+transformers>=4.20.0
+optuna>=3.0.0
+
+# Reinforcement Learning
+stable-baselines3>=2.0.0
+gym>=0.26.0
+ray[tune]>=2.0.0
+
+# Data processing
+sqlalchemy>=2.0.0
+psycopg2-binary>=2.9.0
+redis>=4.5.0
+dask>=2023.1.0
+
+# Web framework and APIs
+fastapi>=0.95.0
+uvicorn>=0.20.0
+websockets>=11.0.0
+requests>=2.28.0
+
+# Game theory and poker specific
+pypokerengine>=1.0.4
+treys>=0.1.8
+pokergames>=0.2.0
+
+# Data visualization and monitoring
+matplotlib>=3.6.0
+seaborn>=0.12.0
+plotly>=5.13.0
+wandb>=0.15.0
+tensorboard>=2.12.0
+
+# Development tools
+pytest>=7.2.0
+pytest-cov>=4.0.0
+black>=23.0.0
+flake8>=6.0.0
+mypy>=1.0.0
+pre-commit>=3.0.0
+
+# Performance optimization
+cython>=0.29.0
+numba>=0.56.0
+joblib>=1.2.0
+
+# Configuration and utilities
+pydantic>=2.0.0
+python-dotenv>=1.0.0
+click>=8.1.0
+tqdm>=4.64.0
+loguru>=0.7.0
+
+# Testing and simulation
+hypothesis>=6.70.0
+faker>=18.0.0
+
+# piosolver-api>=1.0.0  # Uncomment if you have PioSOLVER license 
