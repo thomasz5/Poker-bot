@@ -1,0 +1,81 @@
+Poker Hand #1001: Hold'em No Limit ($0.10/$0.25) - 2024/01/15 14:30:15 ET
+Table 'Aurora 6-max' 6-max Seat #3 is the button
+Seat 1: Hero ($25.00 in chips)
+Seat 2: Villain1 ($22.50 in chips)
+Seat 3: Villain2 ($31.75 in chips)
+Seat 4: Villain3 ($18.90 in chips)
+Seat 5: Villain4 ($45.20 in chips)
+Seat 6: Villain5 ($12.30 in chips)
+Villain3: posts small blind $0.10
+Villain4: posts big blind $0.25
+*** HOLE CARDS ***
+Dealt to Hero [Ac Kh]
+Villain5: folds
+Hero: raises $0.75 to $1.00
+Villain1: calls $1.00
+Villain2: folds
+Villain3: folds
+Villain4: calls $0.75
+*** FLOP *** [As 7h 2c]
+Villain4: checks
+Hero: bets $2.25
+Villain1: folds
+Villain4: calls $2.25
+*** TURN *** [As 7h 2c] [Kd]
+Villain4: checks
+Hero: bets $5.50
+Villain4: calls $5.50
+*** RIVER *** [As 7h 2c Kd] [3s]
+Villain4: checks
+Hero: bets $12.00
+Villain4: calls $12.00
+*** SHOW DOWN ***
+Hero: shows [Ac Kh] (two pair, Aces and Kings)
+Villain4: shows [Ah 7c] (two pair, Aces and Sevens)
+Hero collected $40.35 from pot
+*** SUMMARY ***
+Total pot $42.50 | Rake $2.15
+Board [As 7h 2c Kd 3s]
+Seat 1: Hero showed [Ac Kh] and won ($40.35) with two pair, Aces and Kings
+Seat 2: Villain1 folded on the Flop
+Seat 3: Villain2 (button) folded before Flop (didn't bet)
+Seat 4: Villain3 (small blind) folded before Flop
+Seat 5: Villain4 (big blind) showed [Ah 7c] and lost with two pair, Aces and Sevens
+Seat 6: Villain5 folded before Flop (didn't bet)
+
+Poker Hand #1002: Hold'em No Limit ($0.10/$0.25) - 2024/01/15 14:32:45 ET
+Table 'Aurora 6-max' 6-max Seat #4 is the button
+Seat 1: Hero ($63.35 in chips)
+Seat 2: Villain1 ($21.50 in chips)
+Seat 3: Villain2 ($31.75 in chips)
+Seat 4: Villain3 ($18.80 in chips)
+Seat 5: Villain4 ($25.45 in chips)
+Seat 6: Villain5 ($12.30 in chips)
+Villain4: posts small blind $0.10
+Villain5: posts big blind $0.25
+*** HOLE CARDS ***
+Dealt to Hero [8s 8c]
+Hero: raises $0.75 to $1.00
+Villain1: calls $1.00
+Villain2: raises $4.00 to $5.00
+Villain3: folds
+Villain4: folds
+Villain5: folds
+Hero: folds
+Villain1: calls $4.00
+*** FLOP *** [Qh Jd 9c]
+Villain1: checks
+Villain2: bets $7.50
+Villain1: folds
+Uncalled bet ($7.50) returned to Villain2
+Villain2 collected $11.00 from pot
+Villain2: doesn't show hand
+*** SUMMARY ***
+Total pot $11.35 | Rake $0.35
+Board [Qh Jd 9c]
+Seat 1: Hero folded before Flop
+Seat 2: Villain1 folded on the Flop
+Seat 3: Villain2 collected ($11.00)
+Seat 4: Villain3 (button) folded before Flop (didn't bet)
+Seat 5: Villain4 (small blind) folded before Flop
+Seat 6: Villain5 (big blind) folded before Flop
