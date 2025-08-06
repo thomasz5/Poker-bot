@@ -3,13 +3,12 @@
 from .hand_evaluator import HandEvaluator
 from .game_state import GameState, Player
 from .actions import Action, ActionType
-from .rules import PokerRules
+# from .rules import PokerRules  # Not implemented yet
 
 __all__ = [
     "HandEvaluator",
     "GameState", 
     "Player",
     "Action",
-    "ActionType",
-    "PokerRules"
+    "ActionType"
 ] 
