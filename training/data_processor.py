@@ -169,9 +169,17 @@ class DataProcessor:
                         
                         # Save features
                         feature_dict = self.feature_extractor.extract_features(context)
+                        # Convert NumPy arrays to lists for JSON serialization
+                        serializable_features = {}
+                        for key, value in feature_dict.items():
+                            if hasattr(value, 'tolist'):  # NumPy array
+                                serializable_features[key] = value.tolist()
+                            else:
+                                serializable_features[key] = value
+                        
                         self.data_manager.save_training_features(
                             action_id=action_id,
-                            features=feature_dict,
+                            features=serializable_features,
                             target_action=action.action_type,
                             target_amount=action.amount,
                             feature_version="1.0"

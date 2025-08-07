@@ -90,20 +90,30 @@ class ActionPredictorNetwork(nn.Module):
             outputs = self.forward(features)
             action_probs = outputs['action_probs']
             
+            # Handle batch dimension - squeeze if single example
+            if action_probs.dim() > 1:
+                action_probs = action_probs.squeeze(0)
+            
             # Mask illegal actions if provided
             if legal_actions is not None:
                 mask = torch.zeros_like(action_probs)
                 for action in legal_actions:
-                    mask[action] = 1.0
+                    if action < len(mask):  # Ensure action index is valid
+                        mask[action] = 1.0
                 action_probs = action_probs * mask
-                action_probs = action_probs / action_probs.sum()  # Renormalize
+                # Avoid division by zero
+                if action_probs.sum() > 0:
+                    action_probs = action_probs / action_probs.sum()  # Renormalize
+                else:
+                    # If all actions are masked, use uniform distribution over legal actions
+                    action_probs = mask / mask.sum()
             
             # Get best action
             best_action = torch.argmax(action_probs).item()
             confidence = action_probs[best_action].item()
             
             # Get bet size if action is bet/raise
-            bet_size = outputs['bet_size'].item()
+            bet_size = outputs['bet_size'].squeeze().item() if outputs['bet_size'].numel() > 0 else 0.0
             
             return best_action, bet_size, confidence
 
@@ -310,7 +320,7 @@ class ActionPredictorTrainer:
     
     def load_model(self, file_path: str):
         """Load model from file"""
-        checkpoint = torch.load(file_path)
+        checkpoint = torch.load(file_path, weights_only=False)  # PyTorch 2.6 compatibility
         self.model.load_state_dict(checkpoint['model_state_dict'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         self.train_losses = checkpoint.get('train_losses', [])
@@ -321,8 +331,32 @@ class ActionPredictorTrainer:
 class PokerAI:
     """High-level poker AI that uses the trained model to make decisions"""
     
-    def __init__(self, model_path: Optional[str] = None):
-        self.model = ActionPredictorNetwork()
+    def __init__(self, model_path: Optional[str] = None, model_config: Optional[Dict] = None):
+        # If loading from file, try to determine architecture from the checkpoint
+        if model_path and os.path.exists(model_path):
+            checkpoint = torch.load(model_path, weights_only=False)
+            
+            # Try to infer model architecture from the saved state dict
+            model_state = checkpoint.get('model_state_dict', {})
+            if model_state:
+                hidden_dims = self._infer_hidden_dims(model_state)
+                input_dim = self._infer_input_dim(model_state)
+                num_actions = self._infer_num_actions(model_state)
+                
+                self.model = ActionPredictorNetwork(
+                    input_dim=input_dim,
+                    hidden_dims=hidden_dims,
+                    num_actions=num_actions
+                )
+            else:
+                self.model = ActionPredictorNetwork()
+        elif model_config:
+            # Create model with specified config
+            self.model = ActionPredictorNetwork(**model_config)
+        else:
+            # Default model
+            self.model = ActionPredictorNetwork()
+        
         self.trainer = ActionPredictorTrainer(self.model)
         
         if model_path and os.path.exists(model_path):
@@ -331,6 +365,39 @@ class PokerAI:
         # Action mapping
         self.action_names = ['fold', 'check', 'call', 'bet', 'raise', 'all_in']
         self.id_to_action = {i: name for i, name in enumerate(self.action_names)}
+    
+    def _infer_hidden_dims(self, model_state: Dict) -> List[int]:
+        """Infer hidden dimensions from model state dict"""
+        hidden_dims = []
+        
+        # Look for network layers (excluding final output layer)
+        layer_idx = 0
+        while f'network.{layer_idx}.weight' in model_state:
+            if f'network.{layer_idx + 3}.weight' in model_state:  # Not the final layer
+                hidden_dims.append(model_state[f'network.{layer_idx}.weight'].shape[0])
+            layer_idx += 3  # Skip ReLU and Dropout layers
+        
+        return hidden_dims if hidden_dims else [256, 128, 64]  # Default
+    
+    def _infer_input_dim(self, model_state: Dict) -> int:
+        """Infer input dimension from model state dict"""
+        if 'network.0.weight' in model_state:
+            return model_state['network.0.weight'].shape[1]
+        return 110  # Default
+    
+    def _infer_num_actions(self, model_state: Dict) -> int:
+        """Infer number of actions from model state dict"""
+        # Find the final layer by looking for the highest numbered layer
+        max_layer = 0
+        for key in model_state.keys():
+            if key.startswith('network.') and '.weight' in key:
+                layer_num = int(key.split('.')[1])
+                max_layer = max(max_layer, layer_num)
+        
+        final_layer_key = f'network.{max_layer}.weight'
+        if final_layer_key in model_state:
+            return model_state[final_layer_key].shape[0]
+        return 6  # Default
     
     def make_decision(self, features: np.ndarray, legal_actions: Optional[List[str]] = None) -> Dict[str, any]:
         """Make a poker decision given game features"""
