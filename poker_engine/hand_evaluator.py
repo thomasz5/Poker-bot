@@ -1,6 +1,6 @@
 """Fast poker hand evaluator using lookup tables and bit manipulation."""
 
-from typing import List, Tuple
+from typing import List, Tuple, NamedTuple, Any
 from enum import IntEnum
 import itertools
 
@@ -38,20 +38,65 @@ class Card:
             raise ValueError(f"Invalid suit: {suit_char}")
             
         self.rank = self.RANKS.index(rank_char)
-        self.suit = self.SUITS.index(suit_char)
+        # Provide a flexible suit value supporting both string and int comparisons
+        self.suit = SuitValue(self.SUITS.index(suit_char), suit_char)
         self.card_str = card_str
     
     def __eq__(self, other):
-        return self.rank == other.rank and self.suit == other.suit
+        return isinstance(other, Card) and self.rank == other.rank and self.suit == other.suit
     
     def __hash__(self):
-        return hash((self.rank, self.suit))
+        return hash((self.rank, int(self.suit)))
     
     def __str__(self):
         return self.card_str
     
     def __repr__(self):
         return f"Card('{self.card_str}')"
+
+    def __lt__(self, other):
+        if not isinstance(other, Card):
+            return NotImplemented
+        return self.rank < other.rank
+
+    def __gt__(self, other):
+        if not isinstance(other, Card):
+            return NotImplemented
+        return self.rank > other.rank
+
+
+class EvaluationResult(NamedTuple):
+    rank: HandRank
+    kickers: List[int]
+
+
+class SuitValue:
+    """A suit value that compares equal to either its index (int) or char (str)."""
+
+    def __init__(self, index: int, char: str):
+        self.index = index
+        self.char = char
+
+    def __int__(self) -> int:
+        return self.index
+
+    def __str__(self) -> str:
+        return self.char
+
+    def __repr__(self) -> str:
+        return self.char
+
+    def __hash__(self) -> int:
+        return hash(self.index)
+
+    def __eq__(self, other: Any) -> bool:
+        if isinstance(other, SuitValue):
+            return self.index == other.index
+        if isinstance(other, int):
+            return self.index == other
+        if isinstance(other, str):
+            return self.char == other
+        return False
 
 
 class HandEvaluator:
@@ -78,7 +123,7 @@ class HandEvaluator:
             [9, 10, 11, 12, 0],   # T-J-Q-K-A (broadway)
         ]
     
-    def evaluate_hand(self, cards: List[Card]) -> Tuple[HandRank, List[int]]:
+    def evaluate_hand(self, cards: List[Card]) -> EvaluationResult:
         """
         Evaluate a poker hand and return (hand_rank, kickers).
         
@@ -91,11 +136,15 @@ class HandEvaluator:
         if len(cards) < 5:
             raise ValueError("Need at least 5 cards to evaluate")
         
+        # Check for duplicate cards
+        if len(set(cards)) != len(cards):
+            raise ValueError("Duplicate cards in hand")
+
         # For 6-7 cards, find the best 5-card combination
         if len(cards) > 5:
             best_hand = None
-            best_rank = HandRank.HIGH_CARD
-            best_kickers = []
+            best_rank: HandRank = HandRank.HIGH_CARD
+            best_kickers: List[int] = []
             
             for combo in itertools.combinations(cards, 5):
                 rank, kickers = self._evaluate_five_cards(list(combo))
@@ -104,9 +153,10 @@ class HandEvaluator:
                     best_rank = rank
                     best_kickers = kickers
             
-            return best_rank, best_kickers
+            return EvaluationResult(best_rank, best_kickers)
         
-        return self._evaluate_five_cards(cards)
+        rank, kickers = self._evaluate_five_cards(cards)
+        return EvaluationResult(rank, kickers)
     
     def _evaluate_five_cards(self, cards: List[Card]) -> Tuple[HandRank, List[int]]:
         """Evaluate exactly 5 cards."""
@@ -126,7 +176,7 @@ class HandEvaluator:
         sorted_ranks = [rank for rank, _ in sorted_counts]
         
         # Check for flush
-        is_flush = len(set(suits)) == 1
+        is_flush = len(set(int(s) for s in suits)) == 1
         
         # Check for straight
         is_straight, straight_high = self._is_straight(ranks)
@@ -216,6 +266,25 @@ class HandEvaluator:
         sophisticated equity calculations.
         """
         all_cards = hand + board
+        # If less than 5 cards, approximate preflop/postflop strength heuristically
+        if len(all_cards) < 5:
+            base = 0.1
+            if len(hand) == 2:
+                r1, r2 = hand[0].rank, hand[1].rank
+                suited = hand[0].suit == hand[1].suit
+                high = max(r1, r2)
+                low = min(r1, r2)
+                if r1 == r2:
+                    base = 0.5 + (high / 12.0) * 0.5
+                else:
+                    base = (high + 0.5 * low) / 15.0
+                    if suited:
+                        base += 0.1
+                    if abs(r1 - r2) <= 1:
+                        base += 0.05
+                return float(min(max(base, 0.0), 1.0))
+            return base
+
         rank, kickers = self.evaluate_hand(all_cards)
         
         # Simple hand strength mapping (needs refinement)
@@ -240,6 +309,23 @@ class HandEvaluator:
             base_strength = min(1.0, base_strength + kicker_bonus)
         
         return base_strength
+
+
+# Convenience comparator for tests that pass tuples
+def compare_hands(h1: Tuple[HandRank, List[int]], h2: Tuple[HandRank, List[int]]) -> int:
+    rank1, kickers1 = h1
+    rank2, kickers2 = h2
+    if rank1 > rank2:
+        return 1
+    if rank1 < rank2:
+        return -1
+    # Same rank - compare kickers
+    for k1, k2 in zip(kickers1, kickers2):
+        if k1 > k2:
+            return 1
+        if k1 < k2:
+            return -1
+    return 0
 
 
 # Example usage and testing

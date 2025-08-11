@@ -66,7 +66,9 @@ class Player:
     
     def bet(self, amount: float) -> float:
         """Make a bet, returns actual amount bet"""
-        if amount > self.stack:
+        # Treat betting amount semantics safely:
+        # Any request equal to or greater than current stack results in all-in
+        if amount >= self.stack:
             # All-in
             actual_amount = self.stack
             self.is_all_in = True
@@ -299,21 +301,36 @@ class GameState:
             self.main_pot.add_chips(actual_amount)
             
         elif action.action_type in [ActionType.BET, ActionType.RAISE]:
+            # Interpret action.amount as the total amount this player is betting ("bet/raise to")
             if action.amount:
-                # Validate bet size
-                if action.amount < self.min_raise:
+                target_total_for_player = action.amount
+                # Bet/raise must be at least current_bet for bets or exceed for raises
+                if target_total_for_player <= current_player.current_bet:
                     return False
-                
-                total_bet = current_player.current_bet + action.amount
-                if total_bet > self.current_bet:
-                    # Valid raise
-                    actual_amount = current_player.bet(action.amount)
-                    self.main_pot.add_chips(actual_amount)
-                    self.current_bet = current_player.current_bet
-                    self.min_raise = action.amount
-                    self.last_aggressor_index = self.current_player_index
+
+                # Compute additional chips needed to reach target
+                additional = target_total_for_player - current_player.current_bet
+
+                # Enforce minimum raise amount when raising over an existing bet
+                if self.current_bet > 0:
+                    min_total_required = self.current_bet + self.min_raise
+                    if target_total_for_player < min_total_required:
+                        return False
+
+                actual_amount = current_player.bet(additional)
+                self.main_pot.add_chips(actual_amount)
+                # Update table current bet to the player's new total
+                self.current_bet = current_player.current_bet
+                # Update min_raise to the size of the last raise increment (new - previous table bet)
+                last_raise_increment = max(self.current_bet - (self.current_bet - additional if self.current_bet - additional > 0 else 0) - (self.current_bet - additional - (self.current_bet - additional)), 0.0)
+                # Simpler and correct: when there is an existing bet, min_raise is (new_total - previous_table_bet)
+                if self.current_bet > 0:
+                    # previous_table_bet before this action was (self.current_bet - additional)
+                    previous_table_bet = self.current_bet - additional
+                    self.min_raise = max(self.current_bet - previous_table_bet, self.big_blind)
                 else:
-                    return False
+                    self.min_raise = max(additional, self.big_blind)
+                self.last_aggressor_index = self.current_player_index
         
         elif action.action_type == ActionType.ALL_IN:
             actual_amount = current_player.bet(current_player.stack)
@@ -351,6 +368,10 @@ class GameState:
     
     def _is_betting_round_complete(self) -> bool:
         """Check if the current betting round is finished"""
+        # If no actions have occurred on this street yet, the round cannot be complete
+        if len(self.actions_this_street) == 0:
+            return False
+
         # Count players who can still act
         active_count = sum(1 for p in self.active_players if p.can_act())
         

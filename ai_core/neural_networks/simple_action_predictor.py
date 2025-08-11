@@ -60,8 +60,18 @@ class SimpleActionPredictor:
     def prepare_data(self, dataset: Dict[str, np.ndarray]) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Prepare data for training"""
         features = dataset['features']
-        action_targets = dataset['action_targets']
-        amount_targets = dataset['amount_targets']
+        # Accept either structured dataset (action_targets/amount_targets) or simple one (actions/amounts)
+        if 'action_targets' in dataset and 'amount_targets' in dataset:
+            action_targets = dataset['action_targets']
+            amount_targets = dataset['amount_targets']
+        else:
+            # Expect raw actions as strings and amounts array
+            actions = dataset.get('actions')
+            amounts = dataset.get('amounts')
+            if actions is None or amounts is None:
+                raise KeyError("Dataset must contain either action_targets/amount_targets or actions/amounts")
+            action_targets = np.array([self.action_to_id.get(a, 0) for a in actions])
+            amount_targets = np.array(amounts)
         
         # Scale features
         features_scaled = self.scaler.fit_transform(features)

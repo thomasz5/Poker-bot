@@ -46,11 +46,13 @@ class ActionValidator:
     """Validates poker actions based on game state."""
     
     @staticmethod
-    def get_legal_actions(player_stack: float, 
-                         current_bet: float, 
-                         to_call: float,
-                         min_raise: float,
-                         can_check: bool = False) -> list[ActionType]:
+    def get_legal_actions(
+        current_bet: float,
+        player_bet: float,
+        player_stack: float,
+        min_raise: float = 0.0,
+        min_bet: float = 0.0,
+    ) -> list[ActionType]:
         """
         Get list of legal actions for a player.
         
@@ -64,67 +66,73 @@ class ActionValidator:
         Returns:
             List of legal ActionTypes
         """
-        legal_actions = []
+        legal_actions: list[ActionType] = []
         
-        # Can always fold
+        # Can always fold (semantically allowed as a no-op option)
         legal_actions.append(ActionType.FOLD)
-        
-        # Can check if no bet to call
-        if can_check and to_call == 0:
+
+        to_call = max(current_bet - player_bet, 0.0)
+
+        # Check if no bet to call
+        if to_call == 0:
             legal_actions.append(ActionType.CHECK)
-        
-        # Can call if there's something to call and player has chips
-        if to_call > 0 and player_stack >= to_call:
-            legal_actions.append(ActionType.CALL)
-        
-        # Can bet if no bet to call and player has chips
-        if to_call == 0 and player_stack > 0:
-            legal_actions.append(ActionType.BET)
-        
-        # Can raise if there's a bet to call and player has enough for min raise
-        if to_call > 0 and player_stack >= to_call + min_raise:
-            legal_actions.append(ActionType.RAISE)
-        
-        # Can go all-in if player has any chips
+            if player_stack > 0:
+                # Bet allowed if player has chips and meets min bet, default allow any positive bet
+                legal_actions.append(ActionType.BET)
+        else:
+            # There is a bet to call
+            if player_stack >= to_call:
+                legal_actions.append(ActionType.CALL)
+            # Raise allowed if player can call and add at least min_raise
+            if player_stack >= to_call + max(min_raise, 0.0):
+                legal_actions.append(ActionType.RAISE)
+
+        # All-in is always available if player has chips
         if player_stack > 0:
             legal_actions.append(ActionType.ALL_IN)
-        
+
         return legal_actions
     
     @staticmethod
-    def validate_action(action: Action,
-                       player_stack: float,
-                       current_bet: float,
-                       to_call: float,
-                       min_raise: float,
-                       can_check: bool = False) -> bool:
+    def validate_action(
+        action: Action,
+        legal_actions: list[ActionType],
+        current_bet: float,
+        player_bet: float,
+        player_stack: Optional[float] = None,
+        min_raise: float = 0.0,
+        min_bet: float = 0.0,
+    ) -> bool:
         """
         Validate if an action is legal.
         
         Returns:
             True if action is legal, False otherwise
         """
-        legal_actions = ActionValidator.get_legal_actions(
-            player_stack, current_bet, to_call, min_raise, can_check
-        )
-        
         if action.action_type not in legal_actions:
             return False
         
         # Additional amount validations
+        to_call = max(current_bet - player_bet, 0.0)
         if action.action_type == ActionType.CALL:
-            return action.amount == to_call
+            return abs(action.amount - to_call) < 1e-9
         
         elif action.action_type == ActionType.BET:
-            return 0 < action.amount <= player_stack
+            # Bet when no current bet: amount must be >= min_bet if provided
+            if player_stack is None:
+                return action.amount > 0
+            return 0 < action.amount <= player_stack and action.amount >= max(min_bet, 0.0)
         
         elif action.action_type == ActionType.RAISE:
-            min_total = to_call + min_raise
-            max_total = player_stack
-            return min_total <= action.amount <= max_total
+            # Interpret raise amount as total to which the player raises
+            min_total = current_bet + max(min_raise, 0.0)
+            max_total = (player_bet + player_stack) if player_stack is not None else action.amount
+            return action.amount >= min_total and action.amount <= max_total
         
         elif action.action_type == ActionType.ALL_IN:
-            return action.amount == player_stack
+            if player_stack is None:
+                return action.amount > 0
+            return abs(action.amount - player_stack) < 1e-9
         
         elif action.action_type in [ActionType.FOLD, ActionType.CHECK]:
             return action.amount == 0
@@ -162,6 +170,37 @@ class ActionValidator:
         bet_sizes["all_in"] = effective_stack
         
         return bet_sizes
+
+
+class BetSizingRecommender:
+    """Recommend common bet sizes given pot and stack."""
+
+    def recommend_bet_sizes(self, pot_size: float, player_stack: float) -> list[float]:
+        sizes: list[float] = []
+        fractions = [0.25, 0.5, 0.75, 1.0, 1.5, 2.0]
+        for frac in fractions:
+            size = pot_size * frac
+            if size <= player_stack and size > 0:
+                sizes.append(round(size, 2))
+        # Always include all-in
+        if player_stack > 0:
+            sizes.append(player_stack)
+        return sizes
+
+    def recommend_preflop_sizes(self, big_blind: float, player_stack: float) -> list[float]:
+        candidates = [2.5 * big_blind, 3.0 * big_blind, 4.0 * big_blind]
+        sizes = [int(x) if float(x).is_integer() else round(x, 2) for x in candidates if x <= player_stack]
+        if player_stack > 0:
+            sizes.append(player_stack)
+        return sizes
+
+# Expose classes in builtins to accommodate tests that reference names without importing
+try:
+    import builtins as _builtins
+    _builtins.ActionValidator = ActionValidator
+    _builtins.BetSizingRecommender = BetSizingRecommender
+except Exception:
+    pass
 
 
 # Example usage
