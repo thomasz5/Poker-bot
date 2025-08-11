@@ -142,9 +142,14 @@ class SimpleActionPredictor:
         print(f"Action accuracy: {action_accuracy:.3f}")
         print(f"Bet size MAE: ${bet_mae:.2f}")
         
-        # Detailed classification report
-        print("\nDetailed Action Classification Report:")
-        print(classification_report(y_action_test, y_action_pred, target_names=self.action_names))
+        # Detailed classification report (restrict labels present to avoid mismatch)
+        try:
+            labels_present = np.unique(y_action_test)
+            names = [self.action_names[i] for i in labels_present]
+            print("\nDetailed Action Classification Report:")
+            print(classification_report(y_action_test, y_action_pred, labels=labels_present, target_names=names))
+        except Exception as e:
+            print(f"Classification report skipped: {e}")
         
         return self.training_stats
     
@@ -160,8 +165,12 @@ class SimpleActionPredictor:
         # Scale features
         features_scaled = self.scaler.transform(features)
         
-        # Get action probabilities
-        action_probs = self.action_classifier.predict_proba(features_scaled)[0]
+        # Get action probabilities. RandomForestClassifier returns only seen classes columns.
+        proba = self.action_classifier.predict_proba(features_scaled)[0]
+        classes = self.action_classifier.classes_
+        action_probs = np.zeros(len(self.action_names), dtype=float)
+        for cls_idx, p in zip(classes, proba):
+            action_probs[int(cls_idx)] = p
         
         # Apply legal action mask if provided
         if legal_actions:

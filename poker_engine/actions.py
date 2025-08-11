@@ -67,18 +67,26 @@ class ActionValidator:
             List of legal ActionTypes
         """
         legal_actions: list[ActionType] = []
+
+        # If player has no chips, no actions are available
+        if player_stack <= 0:
+            return []
         
         # Can always fold (semantically allowed as a no-op option)
         legal_actions.append(ActionType.FOLD)
 
         to_call = max(current_bet - player_bet, 0.0)
 
-        # Check if no bet to call
+        # Check if no additional chips are required to continue
         if to_call == 0:
             legal_actions.append(ActionType.CHECK)
-            if player_stack > 0:
-                # Bet allowed if player has chips and meets min bet, default allow any positive bet
+            if current_bet == 0:
+                # No existing bet: can open bet
                 legal_actions.append(ActionType.BET)
+            else:
+                # There is an existing bet on the table (already matched): can raise
+                if player_stack >= max(min_raise, min_bet, 0.0):
+                    legal_actions.append(ActionType.RAISE)
         else:
             # There is a bet to call
             if player_stack >= to_call:
@@ -119,9 +127,8 @@ class ActionValidator:
         
         elif action.action_type == ActionType.BET:
             # Bet when no current bet: amount must be >= min_bet if provided
-            if player_stack is None:
-                return action.amount > 0
-            return 0 < action.amount <= player_stack and action.amount >= max(min_bet, 0.0)
+            stack_ok = True if player_stack is None else action.amount <= player_stack
+            return (action.amount > 0) and stack_ok and (action.amount >= max(min_bet, 0.0))
         
         elif action.action_type == ActionType.RAISE:
             # Interpret raise amount as total to which the player raises

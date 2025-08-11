@@ -51,30 +51,30 @@ class GameContext:
     position: str
     stack_size: float
     hole_cards: List[str]
-    # Alias to support tests that pass hero_cards
-    hero_cards: List[str] = None
-    
-    # Game state
+
+    # Game state (non-defaults)
     pot_size: float
     current_bet: float
     num_players: int
     num_active_players: int
-    
+
     # Board info
     street: Union[str, Street]
     board_cards: List[str]
-    
+
     # Action history
     actions_this_street: List[PlayerAction]
     preflop_actions: List[PlayerAction]
-    
+
     # Stakes and blinds
     big_blind: float
     small_blind: float
-    
-    # Tournament info (optional)
+
+    # Defaults below
     is_tournament: bool = False
     tournament_stage: str = "early"
+    # Alias to support tests that pass hero_cards
+    hero_cards: List[str] = None
 
 
 class FeatureExtractor:
@@ -107,6 +107,7 @@ class FeatureExtractor:
         # Normalize alias fields
         if (not context.hole_cards) and context.hero_cards:
             context.hole_cards = context.hero_cards
+        # Backwards-compat: ignore unexpected keys like hero_bet/num_opponents/opponent_* coming from tests
         
         # Basic features
         features['position'] = self._extract_position_features(context)

@@ -131,6 +131,8 @@ class GameState:
         self.current_bet = 0.0
         self.min_raise = 0.0
         self.last_aggressor_index = -1
+        # Maintain a running total pot value for tests expecting this attribute
+        self.total_pot: float = 0.0
         
         # Hand tracking
         self.hand_number = 0
@@ -216,11 +218,13 @@ class GameState:
         # Post small blind
         sb_amount = sb_player.bet(self.small_blind)
         self.main_pot.add_chips(sb_amount)
+        self.total_pot = self.main_pot.amount
         self.main_pot.eligible_players.append(sb_player.id)
         
         # Post big blind
         bb_amount = bb_player.bet(self.big_blind)
         self.main_pot.add_chips(bb_amount)
+        self.total_pot = self.main_pot.amount
         self.main_pot.eligible_players.append(bb_player.id)
         
         self.current_bet = self.big_blind
@@ -300,6 +304,7 @@ class GameState:
             call_amount = self.current_bet - current_player.current_bet
             actual_amount = current_player.bet(call_amount)
             self.main_pot.add_chips(actual_amount)
+            self.total_pot = self.main_pot.amount
             
         elif action.action_type in [ActionType.BET, ActionType.RAISE]:
             # Interpret action.amount as the total amount this player is betting ("bet/raise to")
@@ -320,6 +325,7 @@ class GameState:
 
                 actual_amount = current_player.bet(additional)
                 self.main_pot.add_chips(actual_amount)
+                self.total_pot = self.main_pot.amount
                 # Update table current bet to the player's new total
                 self.current_bet = current_player.current_bet
                 # Update min_raise to the size of the last raise increment (new - previous table bet)
@@ -338,6 +344,7 @@ class GameState:
             amount_to_bet = current_player.stack
             actual_amount = current_player.bet(amount_to_bet)
             self.main_pot.add_chips(actual_amount)
+            self.total_pot = self.main_pot.amount
             if current_player.current_bet > self.current_bet:
                 self.current_bet = current_player.current_bet
                 self.last_aggressor_index = self.current_player_index

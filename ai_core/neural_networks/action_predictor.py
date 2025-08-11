@@ -87,6 +87,12 @@ class ActionPredictorNetwork(nn.Module):
         """Predict the best action given features"""
         self.eval()
         with torch.no_grad():
+            # Accept numpy arrays or lists
+            if not isinstance(features, torch.Tensor):
+                features = torch.as_tensor(features, dtype=torch.float32)
+            if features.dim() == 1:
+                features = features.unsqueeze(0)
+
             outputs = self.forward(features)
             action_probs = outputs['action_probs']
             
@@ -403,7 +409,7 @@ class PokerAI:
         """Make a poker decision given game features"""
         
         # Convert to tensor
-        features_tensor = torch.FloatTensor(features).unsqueeze(0)
+        features_tensor = torch.as_tensor(features, dtype=torch.float32).unsqueeze(0)
         
         # Convert legal actions to indices
         legal_action_ids = None
