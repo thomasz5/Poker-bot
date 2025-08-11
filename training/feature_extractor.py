@@ -19,7 +19,7 @@ Features extracted:
 """
 
 import numpy as np
-from typing import Dict, List, Any, Tuple, Optional
+from typing import Dict, List, Any, Tuple, Optional, Union
 from dataclasses import dataclass
 from enum import Enum
 import sys
@@ -51,6 +51,8 @@ class GameContext:
     position: str
     stack_size: float
     hole_cards: List[str]
+    # Alias to support tests that pass hero_cards
+    hero_cards: List[str] = None
     
     # Game state
     pot_size: float
@@ -59,7 +61,7 @@ class GameContext:
     num_active_players: int
     
     # Board info
-    street: Street
+    street: Union[str, Street]
     board_cards: List[str]
     
     # Action history
@@ -102,6 +104,9 @@ class FeatureExtractor:
     def extract_features(self, context: GameContext) -> Dict[str, np.ndarray]:
         """Extract all features from game context"""
         features = {}
+        # Normalize alias fields
+        if (not context.hole_cards) and context.hero_cards:
+            context.hole_cards = context.hero_cards
         
         # Basic features
         features['position'] = self._extract_position_features(context)
@@ -366,14 +371,14 @@ class FeatureExtractor:
                 break
         
         # Street-specific patterns
-        street_index = context.street.value
-        if street_index == "preflop":
+        street_value = context.street.value if hasattr(context.street, 'value') else str(context.street)
+        if street_value == "preflop":
             features[15] = 1.0
-        elif street_index == "flop":
+        elif street_value == "flop":
             features[16] = 1.0
-        elif street_index == "turn":
+        elif street_value == "turn":
             features[17] = 1.0
-        elif street_index == "river":
+        elif street_value == "river":
             features[18] = 1.0
         
         # Continuation betting patterns

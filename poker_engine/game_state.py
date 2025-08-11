@@ -181,8 +181,9 @@ class GameState:
         if num_players < 2:
             raise ValueError("Need at least 2 players to start a hand")
         
-        # Move dealer button
-        self.dealer_position = (self.dealer_position + 1) % num_players
+        # Move dealer button except for very first hand
+        if self.hand_number > 1:
+            self.dealer_position = (self.dealer_position + 1) % num_players
         
         if num_players == 2:
             # Heads-up: dealer is small blind
@@ -333,7 +334,9 @@ class GameState:
                 self.last_aggressor_index = self.current_player_index
         
         elif action.action_type == ActionType.ALL_IN:
-            actual_amount = current_player.bet(current_player.stack)
+            # All-in: move entire stack
+            amount_to_bet = current_player.stack
+            actual_amount = current_player.bet(amount_to_bet)
             self.main_pot.add_chips(actual_amount)
             if current_player.current_bet > self.current_bet:
                 self.current_bet = current_player.current_bet
@@ -342,8 +345,9 @@ class GameState:
         # Record action
         self.actions_this_street.append((current_player.id, action))
         
-        # Move to next player
-        self._advance_to_next_player()
+        # Move to next player unless all-in (some flows keep the same pointer until others act)
+        if action.action_type != ActionType.ALL_IN:
+            self._advance_to_next_player()
         
         # Check if betting round is complete
         if self._is_betting_round_complete():
@@ -368,26 +372,22 @@ class GameState:
     
     def _is_betting_round_complete(self) -> bool:
         """Check if the current betting round is finished"""
-        # If no actions have occurred on this street yet, the round cannot be complete
-        if len(self.actions_this_street) == 0:
-            return False
-
-        # Count players who can still act
-        active_count = sum(1 for p in self.active_players if p.can_act())
-        
-        if active_count <= 1:
-            return True
-        
-        # Check if all active players have equal bets
         active_players_in_hand = [p for p in self.active_players if not p.has_folded]
         if len(active_players_in_hand) <= 1:
             return True
-        
-        # All players must have called the current bet
-        for player in active_players_in_hand:
-            if player.can_act() and player.current_bet < self.current_bet:
+
+        # If no bet to call, require that each active player has acted on this street
+        if self.current_bet == 0.0:
+            if len(self.actions_this_street) == 0:
                 return False
-        
+            actors = set(pid for (pid, _) in self.actions_this_street)
+            required = sum(1 for p in active_players_in_hand if p.can_act())
+            return len(actors) >= required
+
+        # There is a bet: ensure all non-folded, non-all-in players have matched the current bet
+        for player in active_players_in_hand:
+            if player.can_act() and not player.is_all_in and player.current_bet < self.current_bet:
+                return False
         return True
     
     def _advance_to_next_street(self):
@@ -448,8 +448,8 @@ class GameState:
     def _handle_showdown(self):
         """Handle showdown and determine winners"""
         # This would integrate with hand evaluator
-        # For now, just mark hand as complete
-        self.phase = GamePhase.HAND_COMPLETE
+        # Keep phase at SHOWDOWN; external resolution may transition to HAND_COMPLETE
+        return
     
     def get_game_info(self) -> Dict:
         """Get current game state information"""

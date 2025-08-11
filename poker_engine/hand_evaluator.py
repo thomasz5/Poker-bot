@@ -276,12 +276,12 @@ class HandEvaluator:
                 low = min(r1, r2)
                 if r1 == r2:
                     base = 0.5 + (high / 12.0) * 0.5
-                else:
-                    base = (high + 0.5 * low) / 15.0
-                    if suited:
-                        base += 0.1
-                    if abs(r1 - r2) <= 1:
-                        base += 0.05
+            else:
+                base = (high + 0.5 * low) / 20.0
+                if suited:
+                    base += 0.1
+                if abs(r1 - r2) <= 1:
+                    base += 0.05
                 return float(min(max(base, 0.0), 1.0))
             return base
 
