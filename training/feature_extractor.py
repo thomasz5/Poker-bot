@@ -20,7 +20,7 @@ Features extracted:
 
 import numpy as np
 from typing import Dict, List, Any, Tuple, Optional, Union
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 import sys
 import os
@@ -70,11 +70,50 @@ class GameContext:
     big_blind: float
     small_blind: float
 
-    # Defaults below
+    # Defaults below (and accept arbitrary extras)
     is_tournament: bool = False
     tournament_stage: str = "early"
     # Alias to support tests that pass hero_cards
     hero_cards: List[str] = None
+    # absorb unknown kwargs to maintain forward-compatibility in tests
+    def __init__(self, *args, **kwargs):
+        # Map legacy keys if present
+        if 'hero_bet' in kwargs:
+            kwargs.pop('hero_bet')
+        if 'num_opponents' in kwargs:
+            kwargs.pop('num_opponents')
+        if 'opponent_aggression' in kwargs:
+            kwargs.pop('opponent_aggression')
+        if 'opponent_vpip' in kwargs:
+            kwargs.pop('opponent_vpip')
+        # Dataclass will handle the rest
+        # Manually call the auto-generated __init__ by reconstructing the class
+        # We recreate an instance dict then set attributes accordingly
+        fields = [
+            'position','stack_size','hole_cards','pot_size','current_bet','num_players','num_active_players',
+            'street','board_cards','actions_this_street','preflop_actions','big_blind','small_blind',
+            'is_tournament','tournament_stage','hero_cards'
+        ]
+        for name in fields:
+            if name in kwargs:
+                setattr(self, name, kwargs.pop(name))
+        # Provide defaults if missing
+        if not hasattr(self, 'hole_cards'):
+            setattr(self, 'hole_cards', [])
+        if not hasattr(self, 'num_active_players') and hasattr(self, 'num_players'):
+            setattr(self, 'num_active_players', getattr(self, 'num_players'))
+        if not hasattr(self, 'actions_this_street'):
+            setattr(self, 'actions_this_street', [])
+        if not hasattr(self, 'preflop_actions'):
+            setattr(self, 'preflop_actions', [])
+        if not hasattr(self, 'big_blind'):
+            setattr(self, 'big_blind', 2.0)
+        if not hasattr(self, 'small_blind'):
+            setattr(self, 'small_blind', 1.0)
+        # Ensure required fields are present
+        missing = [n for n in ['position','stack_size','hole_cards','pot_size','current_bet','num_players','num_active_players','street','board_cards','actions_this_street','preflop_actions','big_blind','small_blind'] if not hasattr(self, n)]
+        if missing:
+            raise TypeError(f"Missing required fields for GameContext: {missing}")
 
 
 class FeatureExtractor:

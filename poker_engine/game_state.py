@@ -291,6 +291,10 @@ class GameState:
         legal_actions = self.get_legal_actions()
         if action.action_type not in legal_actions:
             return False
+        # Additional guardrails: disallow negative/invalid amounts
+        if action.action_type in [ActionType.BET, ActionType.RAISE] and (action.amount is None or action.amount <= 0):
+            return False
+        # Do not enforce exact call amount here; engine will compute the correct call amount
         
         # Execute action
         if action.action_type == ActionType.FOLD:
@@ -301,8 +305,13 @@ class GameState:
             pass
             
         elif action.action_type == ActionType.CALL:
-            call_amount = self.current_bet - current_player.current_bet
-            actual_amount = current_player.bet(call_amount)
+            call_required = max(self.current_bet - current_player.current_bet, 0.0)
+            # Allow implied call when amount is 0; otherwise require exact match
+            if action.amount > 0 and abs(action.amount - call_required) > 1e-9:
+                return False
+            if call_required > current_player.stack:
+                return False
+            actual_amount = current_player.bet(call_required)
             self.main_pot.add_chips(actual_amount)
             self.total_pot = self.main_pot.amount
             

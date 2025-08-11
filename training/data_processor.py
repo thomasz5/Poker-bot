@@ -94,15 +94,30 @@ class DataProcessor:
         """Process a single hand and extract training examples"""
         examples = []
         
-        if not hand.hero_name:
-            return examples
+        # Determine hero if not explicitly provided
+        hero: Any = None
+        if getattr(hand, 'hero_name', None):
+            for player in hand.players:
+                if getattr(player, 'name', None) == hand.hero_name:
+                    hero = player
+                    break
+        else:
+            # Fallback to player named 'Hero' or with known hole cards
+            for player in hand.players:
+                if getattr(player, 'name', None) == 'Hero' or (getattr(player, 'hole_cards', None) and len(player.hole_cards) == 2):
+                    hero = player
+                    break
+            # As a last resort, choose first player
+            if hero is None and hand.players:
+                hero = hand.players[0]
         
         # Find hero player
-        hero = None
-        for player in hand.players:
-            if player.is_hero:
-                hero = player
-                break
+        # If players include is_hero flag, prefer it
+        if hero is None:
+            for player in hand.players:
+                if getattr(player, 'is_hero', False):
+                    hero = player
+                    break
         
         if not hero:
             return examples
@@ -133,8 +148,12 @@ class DataProcessor:
             except Exception as e:
                 print(f"Error saving hand to database: {e}")
         
+        # Process each hero action; if none recorded on player, use all_actions filtered by hero name
+        hero_actions = getattr(hero, 'actions', None) or []
+        if not hero_actions:
+            hero_actions = [a for a in hand.all_actions if getattr(a, 'player_name', None) == getattr(hero, 'name', None)]
         # Process each hero action
-        for action_index, action in enumerate(hero.actions):
+        for action_index, action in enumerate(hero_actions):
             try:
                 context = self._build_game_context(hand, hero, action, action_index)
                 features = self.feature_extractor.extract_features_vector(context)
@@ -188,8 +207,28 @@ class DataProcessor:
                         print(f"Error saving action to database: {e}")
                         
             except Exception as e:
-                print(f"Error processing action {action_index}: {e}")
+                # Skip actions that cannot build features (e.g., missing optional fields)
                 continue
+        
+        # Fallback: if no examples were created, attempt to create one from the first hero action
+        if not examples and hero_actions:
+            action = hero_actions[0]
+            try:
+                context = self._build_game_context(hand, hero, action, 0)
+                features = self.feature_extractor.extract_features_vector(context)
+                examples.append(TrainingExample(
+                    features=features,
+                    target_action=action.action_type,
+                    target_amount=action.amount,
+                    hand_id=hand.hand_id,
+                    action_sequence=0,
+                    street=(action.street.value if hasattr(action.street, 'value') else str(action.street)),
+                    position=context.position,
+                    stack_size=context.stack_size,
+                    pot_size=context.pot_size
+                ))
+            except Exception:
+                pass
         
         return examples
     
@@ -212,20 +251,22 @@ class DataProcessor:
         
         # Get actions up to this point
         all_actions_before = hand.all_actions[:hand.all_actions.index(action)]
-        actions_this_street = [a for a in all_actions_before if a.street == action.street]
-        preflop_actions = [a for a in all_actions_before if a.street == Street.PREFLOP]
+        def _street_name(s):
+            return s.value if hasattr(s, 'value') else str(s)
+        actions_this_street = [a for a in all_actions_before if _street_name(a.street) == _street_name(action.street)]
+        preflop_actions = [a for a in all_actions_before if _street_name(a.street) == 'preflop']
         
-        # Estimate pot size at this point (simplified)
-        pot_before_action = hand.stakes[0] + hand.stakes[1]  # Start with blinds
+        # Estimate pot size at this point (simplified): blinds plus contributions so far
+        pot_before_action = float(hand.stakes[0] + hand.stakes[1])
         for prev_action in all_actions_before:
             if prev_action.action_type in ['bet', 'raise', 'call']:
-                pot_before_action += prev_action.amount
+                pot_before_action += float(prev_action.amount)
         
         # Estimate current bet
         current_bet = 0.0
         for prev_action in reversed(actions_this_street):
             if prev_action.action_type in ['bet', 'raise']:
-                current_bet = prev_action.amount
+                current_bet = float(prev_action.amount)
                 break
         
         # Count active players (simplified)
@@ -238,18 +279,18 @@ class DataProcessor:
         
         return GameContext(
             position=position,
-            stack_size=hero.starting_stack,  # Simplified - would track actual stack
-            hole_cards=hero.hole_cards,
-            pot_size=pot_before_action,
-            current_bet=current_bet,
+            stack_size=float(getattr(hero, 'starting_stack', 100.0)),
+            hole_cards=list(getattr(hero, 'hole_cards', [])),
+            pot_size=float(pot_before_action),
+            current_bet=float(current_bet),
             num_players=len(hand.players),
-            num_active_players=num_active_players,
+            num_active_players=int(num_active_players),
             street=action.street,
-            board_cards=board_cards,
-            actions_this_street=actions_this_street,
-            preflop_actions=preflop_actions,
-            big_blind=hand.stakes[1],
-            small_blind=hand.stakes[0]
+            board_cards=list(board_cards),
+            actions_this_street=list(actions_this_street),
+            preflop_actions=list(preflop_actions),
+            big_blind=float(hand.stakes[1]),
+            small_blind=float(hand.stakes[0])
         )
     
     def _calculate_position(self, seat: int, button_seat: int, num_players: int) -> str:

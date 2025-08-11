@@ -69,3 +69,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# Prevent pytest from collecting helper as a test
+test_model.__test__ = False

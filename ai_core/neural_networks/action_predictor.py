@@ -418,11 +418,25 @@ class PokerAI:
         
         # Get prediction
         action_id, bet_size, confidence = self.model.predict_action(features_tensor, legal_action_ids)
+        # Ensure non-negative amounts; calls/raises of 0 should be treated as check/fold by conversion below
+        if bet_size is None:
+            bet_size = 0.0
+        bet_size = max(0.0, float(bet_size))
         action_name = self.id_to_action[action_id]
         
+        # Sanitize zero/invalid bet sizes by falling back to non-betting actions if possible
+        amount = bet_size if action_name in ['bet', 'raise'] else 0.0
+        if action_name in ['bet', 'raise'] and (amount is None or amount <= 0.0):
+            if legal_actions and 'check' in legal_actions:
+                action_name, amount = 'check', 0.0
+            elif legal_actions and 'call' in legal_actions:
+                action_name, amount = 'call', 0.0
+            else:
+                action_name, amount = 'fold', 0.0
+
         return {
             'action': action_name,
-            'amount': bet_size if action_name in ['bet', 'raise'] else 0.0,
+            'amount': float(amount),
             'confidence': confidence,
             'action_id': action_id
         }

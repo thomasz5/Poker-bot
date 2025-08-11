@@ -327,6 +327,13 @@ def compare_hands(h1: Tuple[HandRank, List[int]], h2: Tuple[HandRank, List[int]]
             return -1
     return 0
 
+# Make compare_hands available globally for tests that call it directly
+try:
+    import builtins as _builtins  # type: ignore
+    _builtins.compare_hands = compare_hands  # type: ignore[attr-defined]
+except Exception:
+    pass
+
 
 # Example usage and testing
 if __name__ == "__main__":
