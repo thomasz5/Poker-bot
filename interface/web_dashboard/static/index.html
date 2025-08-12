@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Poker Simulation</title>
+    <style>
+      body { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; margin: 0; padding: 24px; background: #0b0b0f; color: #e5e7eb; }
+      .card { background: #111827; border: 1px solid #374151; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+      .row { display: flex; gap: 12px; align-items: center; }
+      input, button, select { padding: 8px 12px; border-radius: 8px; border: 1px solid #374151; background: #111827; color: #e5e7eb; }
+      button { cursor: pointer; background: #4c1d95; border-color: #6d28d9; }
+      button:hover { background: #5b21b6; }
+      pre { white-space: pre-wrap; }
+      .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+    </style>
+  </head>
+  <body>
+    <h1>Poker Simulation</h1>
+
+    <div class="card">
+      <h2>Create Match</h2>
+      <div class="row">
+        <input id="p1name" placeholder="P1 Name" value="Alice" />
+        <input id="p1stack" placeholder="P1 Stack" type="number" value="100" />
+        <input id="p2name" placeholder="P2 Name" value="Bob" />
+        <input id="p2stack" placeholder="P2 Stack" type="number" value="100" />
+        <button id="create">Create</button>
+      </div>
+      <p id="matchId"></p>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <h3>State</h3>
+        <button id="refresh">Refresh</button>
+        <pre id="state"></pre>
+      </div>
+      <div class="card">
+        <h3>Step</h3>
+        <div class="row">
+          <select id="action">
+            <option value="check">check</option>
+            <option value="call">call</option>
+            <option value="bet">bet</option>
+            <option value="raise">raise</option>
+            <option value="fold">fold</option>
+            <option value="all_in">all_in</option>
+          </select>
+          <input id="amount" placeholder="amount (optional)" type="number" step="0.01" />
+          <button id="apply">Apply</button>
+        </div>
+        <button id="newHand">Start New Hand</button>
+      </div>
+    </div>
+
+    <script>
+      const API = (path) => path; // same origin by default
+      let matchId = null;
+
+      async function createMatch() {
+        const p1 = { id: 'p1', name: document.getElementById('p1name').value, stack: parseFloat(document.getElementById('p1stack').value) };
+        const p2 = { id: 'p2', name: document.getElementById('p2name').value, stack: parseFloat(document.getElementById('p2stack').value) };
+        const res = await fetch(API('/match'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ players: [p1, p2] }) });
+        const data = await res.json();
+        matchId = data.match_id;
+        document.getElementById('matchId').innerText = 'Match: ' + matchId;
+        document.getElementById('state').innerText = JSON.stringify(data, null, 2);
+      }
+
+      async function refresh() {
+        if (!matchId) return;
+        const res = await fetch(API(`/match/${matchId}`));
+        const data = await res.json();
+        document.getElementById('state').innerText = JSON.stringify(data, null, 2);
+      }
+
+      async function apply() {
+        if (!matchId) return;
+        const action = document.getElementById('action').value;
+        const amountStr = document.getElementById('amount').value;
+        const body = { action };
+        if (amountStr) body.amount = parseFloat(amountStr);
+        const res = await fetch(API(`/match/${matchId}/step`), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const data = await res.json();
+        document.getElementById('state').innerText = JSON.stringify(data, null, 2);
+      }
+
+      async function newHand() {
+        if (!matchId) return;
+        const res = await fetch(API(`/match/${matchId}/hand`), { method: 'POST' });
+        const data = await res.json();
+        document.getElementById('state').innerText = JSON.stringify(data, null, 2);
+      }
+
+      document.getElementById('create').addEventListener('click', createMatch);
+      document.getElementById('refresh').addEventListener('click', refresh);
+      document.getElementById('apply').addEventListener('click', apply);
+      document.getElementById('newHand').addEventListener('click', newHand);
+    </script>
+  </body>
+  </html>
+
+

@@ -75,9 +75,17 @@ class SimulationState:
         }
 
 
-class SimulationRegistry:
-    """Simple in-memory registry. Replace with DB/Redis later."""
+class SimulationStore:
+    """Thin store interface for match state. Swap in Redis/DB later."""
 
+    def create(self, small_blind: float, big_blind: float) -> SimulationState:  # pragma: no cover
+        raise NotImplementedError
+
+    def get(self, match_id: str) -> SimulationState:  # pragma: no cover
+        raise NotImplementedError
+
+
+class InMemoryStore(SimulationStore):
     def __init__(self) -> None:
         self._by_id: Dict[str, SimulationState] = {}
 
@@ -88,16 +96,26 @@ class SimulationRegistry:
         return state
 
     def get(self, match_id: str) -> SimulationState:
-        if match_id not in self._by_id:
+        try:
+            return self._by_id[match_id]
+        except KeyError:
             raise SimulationError(f"Match not found: {match_id}")
-        return self._by_id[match_id]
 
 
-registry = SimulationRegistry()
+_store: SimulationStore = InMemoryStore()
+
+
+def set_store(store: SimulationStore) -> None:
+    global _store
+    _store = store
+
+
+def get_store() -> SimulationStore:
+    return _store
 
 
 def create_match(players: List[PlayerSpec], small_blind: float = 1.0, big_blind: float = 2.0) -> Dict:
-    state = registry.create(small_blind, big_blind)
+    state = _store.create(small_blind, big_blind)
     # Add players
     for spec in players:
         p = state.game.add_player(spec.id, spec.name, float(spec.stack))
@@ -108,17 +126,17 @@ def create_match(players: List[PlayerSpec], small_blind: float = 1.0, big_blind:
 
 
 def start_new_hand(match_id: str) -> Dict:
-    state = registry.get(match_id)
+    state = _store.get(match_id)
     state.game.start_new_hand()
     return state.summarize()
 
 
 def get_state(match_id: str) -> Dict:
-    return registry.get(match_id).summarize()
+    return _store.get(match_id).summarize()
 
 
 def get_legal_actions(match_id: str) -> List[str]:
-    state = registry.get(match_id)
+    state = _store.get(match_id)
     return [a.value for a in state.game.get_legal_actions()]
 
 
