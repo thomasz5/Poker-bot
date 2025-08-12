@@ -8,13 +8,28 @@ You can mount this in a server process. Designed to be scalable:
 from __future__ import annotations
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from typing import List, Optional
 
 from .simulator import create_match, start_new_hand, get_state, get_legal_actions, apply_action, PlayerSpec
+from ai_core.neural_networks.action_predictor import PokerAI
 
 
 app = FastAPI(title="Poker Simulation API", version="0.1.0")
+
+# Serve static dashboard under /static and redirect root
+app.mount(
+    "/static",
+    StaticFiles(directory="interface/web_dashboard/static"),
+    name="static",
+)
+
+
+@app.get("/", include_in_schema=False)
+def root_redirect():
+    return RedirectResponse(url="/static/index.html")
 
 
 class PlayerIn(BaseModel):
@@ -74,6 +89,54 @@ def api_legal_actions(match_id: str):
 def api_step(match_id: str, payload: StepIn):
     try:
         return apply_action(match_id, payload.action, payload.amount)
+    except Exception as e:
+        raise HTTPException(400, str(e))
+
+
+# ---- AI Endpoints ----
+
+class DecisionIn(BaseModel):
+    features: list[float]
+    legal_actions: Optional[list[str]] = None
+
+
+ai_singleton: Optional[PokerAI] = None
+
+
+def get_ai() -> PokerAI:
+    global ai_singleton
+    if ai_singleton is None:
+        ai_singleton = PokerAI()
+    return ai_singleton
+
+
+@app.post("/ai/decision", summary="Get AI decision")
+def ai_decision(payload: DecisionIn):
+    try:
+        ai = get_ai()
+        return ai.make_decision(payload.features, payload.legal_actions)
+    except Exception as e:
+        raise HTTPException(400, str(e))
+
+
+class AutoStepOut(BaseModel):
+    state: dict
+    decision: dict
+
+
+@app.post("/match/{match_id}/auto_step", response_model=AutoStepOut, summary="AI chooses and applies an action")
+def auto_step(match_id: str):
+    try:
+        state = get_state(match_id)
+        legal = get_legal_actions(match_id)
+        # Placeholder features; later wire from real extractor
+        features = [0.0] * 110
+        ai = get_ai()
+        decision = ai.make_decision(features, legal)
+        # Apply
+        amount = decision.get("amount", 0.0)
+        new_state = apply_action(match_id, decision["action"], amount)
+        return {"state": new_state, "decision": decision}
     except Exception as e:
         raise HTTPException(400, str(e))
 
