@@ -12,6 +12,15 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Dict, List, Optional
 from uuid import uuid4
+import os
+import json
+import base64
+import pickle
+
+try:  # Optional redis
+    import redis  # type: ignore
+except Exception:  # pragma: no cover
+    redis = None
 
 from poker_engine.game_state import GameState, GamePhase, Player as EnginePlayer
 from poker_engine.actions import Action, ActionType
@@ -102,6 +111,49 @@ class InMemoryStore(SimulationStore):
             raise SimulationError(f"Match not found: {match_id}")
 
 
+class RedisStore(SimulationStore):
+    """JSON-blob per match key using Redis.
+
+    To keep development velocity, we store a JSON object with a base64-encoded pickle payload for now:
+      { "payload": "<base64>" }
+    This satisfies the "one JSON blob per match key" requirement while avoiding premature schema lock-in.
+    We can migrate to a fully readable schema later.
+    """
+
+    def __init__(self, url: str, namespace: str = "poker:match") -> None:
+        if redis is None:  # pragma: no cover
+            raise SimulationError("redis package not available; install redis>=4 to use RedisStore")
+        self._r = redis.from_url(url, decode_responses=True)
+        self._ns = namespace
+
+    def _key(self, match_id: str) -> str:
+        return f"{self._ns}:{match_id}"
+
+    @staticmethod
+    def _encode(state: SimulationState) -> str:
+        raw = pickle.dumps(state)
+        return base64.b64encode(raw).decode("utf-8")
+
+    @staticmethod
+    def _decode(payload: str) -> SimulationState:
+        raw = base64.b64decode(payload.encode("utf-8"))
+        return pickle.loads(raw)
+
+    def create(self, small_blind: float = 1.0, big_blind: float = 2.0) -> SimulationState:
+        match_id = str(uuid4())
+        state = SimulationState(match_id=match_id, game=GameState(small_blind, big_blind))
+        blob = json.dumps({"payload": self._encode(state)})
+        self._r.set(self._key(match_id), blob)
+        return state
+
+    def get(self, match_id: str) -> SimulationState:
+        blob = self._r.get(self._key(match_id))
+        if not blob:
+            raise SimulationError(f"Match not found: {match_id}")
+        data = json.loads(blob)
+        return self._decode(data["payload"])  # type: ignore[index]
+
+
 _store: SimulationStore = InMemoryStore()
 
 
@@ -112,6 +164,19 @@ def set_store(store: SimulationStore) -> None:
 
 def get_store() -> SimulationStore:
     return _store
+
+
+def configure_store_from_env() -> None:
+    mode = os.getenv("SIM_STORE", "memory").lower()
+    if mode == "redis":
+        url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+        try:
+            set_store(RedisStore(url))
+        except Exception as e:  # pragma: no cover
+            # Fallback to memory if redis not available
+            set_store(InMemoryStore())
+    else:
+        set_store(InMemoryStore())
 
 
 def create_match(players: List[PlayerSpec], small_blind: float = 1.0, big_blind: float = 2.0) -> Dict:
@@ -141,7 +206,7 @@ def get_legal_actions(match_id: str) -> List[str]:
 
 
 def apply_action(match_id: str, action_name: str, amount: Optional[float] = None) -> Dict:
-    state = registry.get(match_id)
+    state = _store.get(match_id)
     atype = ActionString.to_action_type(action_name)
     action = Action(atype, amount=float(amount) if amount is not None else 0.0)
     ok = state.game.process_action(action)

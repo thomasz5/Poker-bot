@@ -153,6 +153,7 @@ logs/
 *.pkl
 *.h5
 *.model
+IMPROVEMENT_ROADMAP.md
 
 # Training data and large files
 training_data/

@@ -13,10 +13,19 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from typing import List, Optional
 
-from .simulator import create_match, start_new_hand, get_state, get_legal_actions, apply_action, PlayerSpec
+from .simulator import (
+    create_match,
+    start_new_hand,
+    get_state,
+    get_legal_actions,
+    apply_action,
+    PlayerSpec,
+    configure_store_from_env,
+)
 from ai_core.neural_networks.action_predictor import PokerAI
 
 
+configure_store_from_env()
 app = FastAPI(title="Poker Simulation API", version="0.1.0")
 
 # Serve static dashboard under /static and redirect root

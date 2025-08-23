@@ -66,3 +66,29 @@ This is a research and educational project. Key areas for contribution:
 - Testing and validation
 
 ---
+
+## Docker
+
+### Build images
+```bash
+docker compose build
+```
+
+### Run API
+```bash
+docker compose up api
+# API at http://localhost:8000 (dashboard at /static)
+```
+
+Environment options:
+- `SIM_STORE=redis` to back matches by Redis (compose starts `redis` service)
+
+### Run trainer
+```bash
+docker compose run --rm trainer
+```
+
+### Develop interactively
+```bash
+docker compose up --build
+```

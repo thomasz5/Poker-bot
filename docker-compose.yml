@@ -1,0 +1,34 @@
+version: "3.9"
+
+services:
+  api:
+    build: .
+    image: poker-bot:latest
+    container_name: poker-bot-api
+    ports:
+      - "8000:8000"
+    environment:
+      - SIM_STORE=${SIM_STORE:-memory}
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - redis
+    command: ["uvicorn", "interface.simulation.api:app", "--host", "0.0.0.0", "--port", "8000"]
+
+  trainer:
+    build: .
+    image: poker-bot:latest
+    container_name: poker-bot-trainer
+    environment:
+      - PYTHONWARNINGS=ignore
+    volumes:
+      - ./:/app
+    command: ["python", "scripts/train_baseline_model.py"]
+
+  redis:
+    image: redis:7-alpine
+    container_name: poker-bot-redis
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+
+
