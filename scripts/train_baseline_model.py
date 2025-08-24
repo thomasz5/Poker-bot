@@ -13,6 +13,18 @@ import numpy as np
 import torch
 from typing import Dict, List, Any
 from datetime import datetime
+import os
+
+USE_MLFLOW = os.environ.get("USE_MLFLOW", "1") == "1"
+if USE_MLFLOW:
+    try:
+        import mlflow
+        mlflow.set_tracking_uri(os.environ.get("MLFLOW_TRACKING_URI", "http://localhost:5000"))
+        MLFLOW_OK = True
+    except Exception:
+        MLFLOW_OK = False
+else:
+    MLFLOW_OK = False
 
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -106,6 +118,16 @@ class BaselineModelTrainer:
         
         # Train model
         start_time = datetime.now()
+        if MLFLOW_OK:
+            mlflow.set_experiment("poker-baseline")
+            mlflow.start_run(run_name=f"baseline-{config_name}")
+            mlflow.log_params({
+                'hidden_dims': config['hidden_dims'],
+                'learning_rate': config['learning_rate'],
+                'epochs': config['epochs'],
+                'batch_size': config['batch_size'],
+            })
+
         history = trainer.train(
             dataset,
             epochs=config['epochs'],
@@ -128,10 +150,20 @@ class BaselineModelTrainer:
         }
         
         final_metrics = trainer.evaluate(val_dataset)
+        if MLFLOW_OK:
+            mlflow.log_metrics({
+                'val_loss': float(final_metrics['loss']),
+                'val_accuracy': float(final_metrics['accuracy']),
+                'val_bet_size_loss': float(final_metrics.get('bet_size_loss', 0.0)),
+                'val_bucket_loss': float(final_metrics.get('bucket_loss', 0.0)),
+                'val_bet_size_mae': float(final_metrics.get('bet_size_mae', 0.0)),
+            })
         
         # Save model
         model_path = os.path.join(self.results_dir, f"{config_name}_model.pth")
         trainer.save_model(model_path)
+        if MLFLOW_OK:
+            mlflow.log_artifact(model_path)
         
         # Compile results
         results = {
@@ -151,6 +183,8 @@ class BaselineModelTrainer:
         print(f"  Model parameters: {results['num_parameters']:,}")
         print(f"  Model size: {results['model_size_mb']:.2f} MB")
         
+        if MLFLOW_OK:
+            mlflow.end_run()
         return results
     
     def run_comprehensive_evaluation(self, dataset: Dict[str, np.ndarray]):

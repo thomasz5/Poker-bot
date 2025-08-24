@@ -24,6 +24,25 @@ services:
       - ./:/app
     command: ["python", "scripts/train_baseline_model.py"]
 
+  dataset:
+    build: .
+    image: poker-bot:latest
+    container_name: poker-bot-dataset
+    volumes:
+      - ./:/app
+    command: ["python", "scripts/scaffold_dataset.py"]
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.13.0
+    container_name: poker-bot-mlflow
+    ports:
+      - "5000:5000"
+    environment:
+      - MLFLOW_TRACKING_URI=http://0.0.0.0:5000
+    volumes:
+      - ./mlruns:/mlflow/mlruns
+    command: ["mlflow", "server", "--host", "0.0.0.0", "--port", "5000", "--backend-store-uri", "/mlflow/mlruns", "--default-artifact-root", "/mlflow/mlruns"]
+
   redis:
     image: redis:7-alpine
     container_name: poker-bot-redis

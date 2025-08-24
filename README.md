@@ -92,3 +92,18 @@ docker compose run --rm trainer
 ```bash
 docker compose up --build
 ```
+
+### Create a starter dataset
+```bash
+# Uses sample hand histories under data/sample_hands/
+docker compose run --rm dataset
+# Artifacts written to training_data/dataset.npz and training_data/manifest.json
+```
+
+### MLflow tracking
+```bash
+docker compose up -d mlflow
+export USE_MLFLOW=1
+docker compose run --rm -e USE_MLFLOW=1 trainer
+# Open http://localhost:5000 to view runs
+```

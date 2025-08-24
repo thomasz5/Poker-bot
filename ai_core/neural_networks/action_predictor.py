@@ -55,12 +55,19 @@ class ActionPredictorNetwork(nn.Module):
         
         self.network = nn.Sequential(*layers)
         
-        # Optional: separate head for bet sizing (when action is bet/raise)
+        # Optional: separate head for bet sizing (regression)
         self.bet_size_head = nn.Sequential(
             nn.Linear(prev_dim, 32),
             nn.ReLU(),
             nn.Linear(32, 1),
-            nn.ReLU()  # Ensure positive bet sizes
+            nn.ReLU()
+        )
+
+        # Optional: discrete bet-size bucket head (0..len(edges))
+        self.bet_bucket_head = nn.Sequential(
+            nn.Linear(prev_dim, 32),
+            nn.ReLU(),
+            nn.Linear(32, 5)  # 5 buckets by default; aligns with DataProcessor.bet_bucket_edges
         )
         
     def forward(self, features: torch.Tensor) -> Dict[str, torch.Tensor]:
@@ -74,13 +81,15 @@ class ActionPredictorNetwork(nn.Module):
         action_logits = self.network[-1](x)
         action_probs = F.softmax(action_logits, dim=-1)
         
-        # Bet size prediction (only used when action is bet/raise)
+        # Bet size predictions
         bet_size = self.bet_size_head(x)
+        bet_bucket_logits = self.bet_bucket_head(x)
         
         return {
             'action_logits': action_logits,
             'action_probs': action_probs,
-            'bet_size': bet_size
+            'bet_size': bet_size,
+            'bet_bucket_logits': bet_bucket_logits
         }
     
     def predict_action(self, features: torch.Tensor, legal_actions: Optional[List[int]] = None) -> Tuple[int, float]:
@@ -92,6 +101,13 @@ class ActionPredictorNetwork(nn.Module):
                 features = torch.as_tensor(features, dtype=torch.float32)
             if features.dim() == 1:
                 features = features.unsqueeze(0)
+
+            # Move features to the same device as model parameters
+            try:
+                model_device = next(self.parameters()).device
+                features = features.to(model_device)
+            except Exception:
+                pass
 
             outputs = self.forward(features)
             action_probs = outputs['action_probs']
@@ -129,9 +145,21 @@ class ActionPredictorTrainer:
     
     def __init__(self, model: ActionPredictorNetwork, learning_rate: float = 0.001):
         self.model = model
+        # Prefer Apple Metal (MPS) on macOS, then CUDA, then CPU
+        try:
+            if torch.backends.mps.is_available():
+                self.device = torch.device("mps")
+            elif torch.cuda.is_available():
+                self.device = torch.device("cuda")
+            else:
+                self.device = torch.device("cpu")
+        except Exception:
+            self.device = torch.device("cpu")
+        self.model.to(self.device)
         self.optimizer = optim.Adam(model.parameters(), lr=learning_rate)
         self.action_criterion = nn.CrossEntropyLoss()
         self.bet_criterion = nn.MSELoss()
+        self.bucket_criterion = nn.CrossEntropyLoss()
         
         # Training history
         self.train_losses = []
@@ -140,7 +168,7 @@ class ActionPredictorTrainer:
         # Action mapping
         self.action_names = ['fold', 'check', 'call', 'bet', 'raise', 'all_in']
     
-    def train_step(self, features: torch.Tensor, action_targets: torch.Tensor, amount_targets: torch.Tensor) -> Dict[str, float]:
+    def train_step(self, features: torch.Tensor, action_targets: torch.Tensor, amount_targets: torch.Tensor, bet_bucket_targets: Optional[torch.Tensor] = None) -> Dict[str, float]:
         """Single training step"""
         self.model.train()
         self.optimizer.zero_grad()
@@ -149,6 +177,7 @@ class ActionPredictorTrainer:
         outputs = self.model(features)
         action_logits = outputs['action_logits']
         bet_sizes = outputs['bet_size'].squeeze()
+        bet_bucket_logits = outputs['bet_bucket_logits']
         
         # Action loss
         action_loss = self.action_criterion(action_logits, action_targets)
@@ -159,9 +188,16 @@ class ActionPredictorTrainer:
             bet_size_loss = self.bet_criterion(bet_sizes[bet_mask], amount_targets[bet_mask])
         else:
             bet_size_loss = torch.tensor(0.0)
+
+        bucket_loss_val = 0.0
+        if bet_bucket_targets is not None and bet_mask.sum() > 0:
+            bucket_loss = self.bucket_criterion(bet_bucket_logits[bet_mask], bet_bucket_targets[bet_mask])
+            bucket_loss_val = bucket_loss.item()
+        else:
+            bucket_loss = torch.tensor(0.0)
         
         # Combined loss
-        total_loss = action_loss + 0.1 * bet_size_loss  # Weight bet size loss lower
+        total_loss = action_loss + 0.1 * bet_size_loss + 0.2 * bucket_loss
         
         # Backward pass
         total_loss.backward()
@@ -175,14 +211,19 @@ class ActionPredictorTrainer:
             'total_loss': total_loss.item(),
             'action_loss': action_loss.item(),
             'bet_size_loss': bet_size_loss.item() if isinstance(bet_size_loss, torch.Tensor) else 0.0,
+            'bucket_loss': bucket_loss_val,
             'accuracy': accuracy
         }
     
     def train_epoch(self, dataset: Dict[str, np.ndarray], batch_size: int = 32) -> Dict[str, float]:
         """Train for one epoch"""
-        features = torch.FloatTensor(dataset['features'])
-        action_targets = torch.LongTensor(dataset['action_targets'])
-        amount_targets = torch.FloatTensor(dataset['amount_targets'])
+        features = torch.FloatTensor(dataset['features']).to(self.device)
+        action_targets = torch.LongTensor(dataset['action_targets']).to(self.device)
+        amount_targets = torch.FloatTensor(dataset['amount_targets']).to(self.device)
+        bet_bucket_targets = (
+            torch.LongTensor(dataset.get('bet_bucket_targets')).to(self.device)
+            if 'bet_bucket_targets' in dataset else None
+        )
         
         # Shuffle data
         indices = torch.randperm(len(features))
@@ -199,7 +240,12 @@ class ActionPredictorTrainer:
             batch_actions = action_targets[i:i+batch_size]
             batch_amounts = amount_targets[i:i+batch_size]
             
-            metrics = self.train_step(batch_features, batch_actions, batch_amounts)
+            metrics = self.train_step(
+                batch_features,
+                batch_actions,
+                batch_amounts,
+                bet_bucket_targets[i:i+batch_size] if bet_bucket_targets is not None else None,
+            )
             epoch_losses.append(metrics['total_loss'])
             epoch_accuracies.append(metrics['accuracy'])
         
@@ -218,15 +264,20 @@ class ActionPredictorTrainer:
     def evaluate(self, dataset: Dict[str, np.ndarray]) -> Dict[str, float]:
         """Evaluate model on dataset"""
         self.model.eval()
-        
-        features = torch.FloatTensor(dataset['features'])
-        action_targets = torch.LongTensor(dataset['action_targets'])
-        amount_targets = torch.FloatTensor(dataset['amount_targets'])
+
+        features = torch.FloatTensor(dataset['features']).to(self.device)
+        action_targets = torch.LongTensor(dataset['action_targets']).to(self.device)
+        amount_targets = torch.FloatTensor(dataset['amount_targets']).to(self.device)
+        bet_bucket_targets = (
+            torch.LongTensor(dataset.get('bet_bucket_targets')).to(self.device)
+            if 'bet_bucket_targets' in dataset else None
+        )
         
         with torch.no_grad():
             outputs = self.model(features)
             action_logits = outputs['action_logits']
             bet_sizes = outputs['bet_size'].squeeze()
+            bet_bucket_logits = outputs['bet_bucket_logits']
             
             # Action loss and accuracy
             action_loss = self.action_criterion(action_logits, action_targets)
@@ -238,9 +289,11 @@ class ActionPredictorTrainer:
             if bet_mask.sum() > 0:
                 bet_size_loss = self.bet_criterion(bet_sizes[bet_mask], amount_targets[bet_mask])
                 bet_size_mae = torch.abs(bet_sizes[bet_mask] - amount_targets[bet_mask]).mean().item()
+                bucket_loss = self.bucket_criterion(bet_bucket_logits[bet_mask], bet_bucket_targets[bet_mask]) if bet_bucket_targets is not None else torch.tensor(0.0)
             else:
                 bet_size_loss = torch.tensor(0.0)
                 bet_size_mae = 0.0
+                bucket_loss = torch.tensor(0.0)
             
             # Per-action accuracy
             action_accuracies = {}
@@ -255,6 +308,7 @@ class ActionPredictorTrainer:
             'accuracy': accuracy,
             'bet_size_loss': bet_size_loss.item() if isinstance(bet_size_loss, torch.Tensor) else 0.0,
             'bet_size_mae': bet_size_mae,
+            'bucket_loss': bucket_loss.item() if isinstance(bucket_loss, torch.Tensor) else 0.0,
             'action_accuracies': action_accuracies
         }
     

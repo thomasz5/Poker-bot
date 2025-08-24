@@ -62,6 +62,10 @@ class DataProcessor:
             'all_in': 5
         }
         self.id_to_action = {v: k for k, v in self.action_to_id.items()}
+        
+        # Bet size bucket edges as fraction of pot (exclusive upper bounds)
+        # [0, 0.33), [0.33, 0.66), [0.66, 1.0), [1.0, 1.5), [1.5, inf)
+        self.bet_bucket_edges = [0.33, 0.66, 1.0, 1.5]
     
     def process_hand_history_file(self, file_path: str, save_to_db: bool = True) -> List[TrainingExample]:
         """Process a complete hand history file"""
@@ -159,6 +163,11 @@ class DataProcessor:
                 features = self.feature_extractor.extract_features_vector(context)
                 
                 # Create training example
+                # Derive amount in pot-fractions for bucketed sizing
+                # Use pot before action for normalization; guard divide-by-zero
+                pot_ref = max(context.pot_size, 1e-6)
+                amount_pf = float(action.amount) / float(pot_ref) if action.amount else 0.0
+
                 example = TrainingExample(
                     features=features,
                     target_action=action.action_type,
@@ -325,7 +334,17 @@ class DataProcessor:
         # Convert to numpy arrays
         features = np.array([ex.features for ex in all_examples])
         action_targets = np.array([self.action_to_id.get(ex.target_action, 0) for ex in all_examples])
-        amount_targets = np.array([ex.target_amount for ex in all_examples])
+        amount_targets = np.array([ex.target_amount for ex in all_examples], dtype=float)
+        # Compute per-example pot-fraction and bucket ids for bet/raise actions; 0 for others
+        pot_refs = np.array([max(ex.pot_size, 1e-6) for ex in all_examples], dtype=float)
+        pot_fracs = np.divide(amount_targets, pot_refs, out=np.zeros_like(amount_targets, dtype=float), where=pot_refs>0)
+        bet_bucket_ids = np.zeros_like(action_targets, dtype=int)
+        # Assign buckets only for bet/raise
+        bet_mask = (action_targets == self.action_to_id['bet']) | (action_targets == self.action_to_id['raise'])
+        if bet_mask.any():
+            edges = np.array(self.bet_bucket_edges, dtype=float)
+            # np.digitize returns indices in 0..len(edges)
+            bet_bucket_ids[bet_mask] = np.digitize(pot_fracs[bet_mask], edges, right=False)
         
         # Additional metadata
         metadata = {
@@ -340,6 +359,7 @@ class DataProcessor:
             'features': features,
             'action_targets': action_targets,
             'amount_targets': amount_targets,
+            'bet_bucket_targets': bet_bucket_ids,
             'metadata': metadata,
             'feature_dim': features.shape[1] if len(features) > 0 else 0,
             'num_actions': len(self.action_to_id),
