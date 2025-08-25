@@ -42,6 +42,7 @@ class TrainingExample:
     position: str
     stack_size: float
     pot_size: float
+    big_blind: float = 2.0
 
 
 class DataProcessor:
@@ -177,7 +178,8 @@ class DataProcessor:
                     street=action.street.value,
                     position=context.position,
                     stack_size=context.stack_size,
-                    pot_size=context.pot_size
+                    pot_size=context.pot_size,
+                    big_blind=context.big_blind
                 )
                 examples.append(example)
                 
@@ -347,12 +349,24 @@ class DataProcessor:
             bet_bucket_ids[bet_mask] = np.digitize(pot_fracs[bet_mask], edges, right=False)
         
         # Additional metadata
+        # Compute derived metadata
+        stack_depth_bb = [
+            (ex.stack_size / ex.pot_size * ex.pot_size / ex.big_blind) if ex.big_blind > 0 else 0.0
+            for ex in all_examples
+        ]
+        # Simplify: stack_size in big blinds
+        stack_depth_bb = [
+            (ex.stack_size / ex.big_blind if ex.big_blind > 0 else 0.0) for ex in all_examples
+        ]
+
         metadata = {
             'hand_ids': [ex.hand_id for ex in all_examples],
             'streets': [ex.street for ex in all_examples],
             'positions': [ex.position for ex in all_examples],
             'stack_sizes': [ex.stack_size for ex in all_examples],
-            'pot_sizes': [ex.pot_size for ex in all_examples]
+            'pot_sizes': [ex.pot_size for ex in all_examples],
+            'big_blinds': [ex.big_blind for ex in all_examples],
+            'stack_depth_bb': stack_depth_bb
         }
         
         dataset = {
@@ -372,19 +386,25 @@ class DataProcessor:
         
         return dataset
 
-    def stratified_split_indices(self, metadata: Dict[str, Any], validation_split: float = 0.2, seed: int = 42) -> Dict[str, np.ndarray]:
-        """Create stratified train/val indices by street and position.
-
-        We form strata using (street, position) pairs, then allocate per-stratum
-        samples into train/val according to the split ratio.
-        """
+    def stratified_split_indices(self, metadata: Dict[str, Any], validation_split: float = 0.2, seed: int = 42, include_stack_depth: bool = False) -> Dict[str, np.ndarray]:
+        """Create stratified train/val indices by (street, position[, stack-depth bucket])."""
         np.random.seed(seed)
         n = len(metadata['streets'])
         keys = []
+        # Optional stack-depth buckets (in big blinds)
+        depth_buckets = None
+        if include_stack_depth and 'stack_depth_bb' in metadata:
+            arr = np.array(metadata['stack_depth_bb'], dtype=float)
+            # Buckets: <20, 20-60, >60
+            bins = np.array([20.0, 60.0])
+            depth_buckets = np.digitize(arr, bins, right=False)
         for i in range(n):
             street = metadata['streets'][i]
             position = metadata['positions'][i]
-            keys.append((street, position))
+            if depth_buckets is not None:
+                keys.append((street, position, int(depth_buckets[i])))
+            else:
+                keys.append((street, position))
 
         # group indices by key
         from collections import defaultdict
@@ -411,6 +431,71 @@ class DataProcessor:
             val_indices = val_indices[np.random.permutation(len(val_indices))]
 
         return {"train": train_indices, "val": val_indices}
+
+    def stratified_group_split_indices(self, metadata: Dict[str, Any], validation_split: float = 0.2, seed: int = 42, include_stack_depth: bool = False) -> Dict[str, np.ndarray]:
+        """Group-aware stratified split by hand_id.
+
+        We assign each hand (group) to a stratum based on the modal (street, position[, stack bucket])
+        among its examples, then split groups within each stratum.
+        """
+        np.random.seed(seed)
+        hand_ids = metadata['hand_ids']
+        streets = metadata['streets']
+        positions = metadata['positions']
+        n = len(hand_ids)
+
+        depth_buckets = None
+        if include_stack_depth and 'stack_depth_bb' in metadata:
+            arr = np.array(metadata['stack_depth_bb'], dtype=float)
+            bins = np.array([20.0, 60.0])
+            depth_buckets = np.digitize(arr, bins, right=False)
+
+        from collections import defaultdict, Counter
+        # Map hand_id to all indices
+        group_indices: Dict[str, List[int]] = defaultdict(list)
+        for i in range(n):
+            group_indices[hand_ids[i]].append(i)
+
+        # Determine a key per group via mode
+        group_key: Dict[str, Any] = {}
+        for hid, idxs in group_indices.items():
+            labels = []
+            for i in idxs:
+                if depth_buckets is not None:
+                    labels.append((streets[i], positions[i], int(depth_buckets[i])))
+                else:
+                    labels.append((streets[i], positions[i]))
+            key = Counter(labels).most_common(1)[0][0]
+            group_key[hid] = key
+
+        # Group hands by key
+        strata: Dict[Any, List[str]] = defaultdict(list)
+        for hid, key in group_key.items():
+            strata[key].append(hid)
+
+        train_idx: List[int] = []
+        val_idx: List[int] = []
+        for key, hids in strata.items():
+            hids = list(hids)
+            perm = np.random.permutation(len(hids))
+            hids = [hids[i] for i in perm]
+            n_val = max(1, int(len(hids) * validation_split)) if len(hids) > 0 else 0
+            val_hids = set(hids[:n_val])
+            train_hids = set(hids[n_val:])
+            for hid in val_hids:
+                val_idx.extend(group_indices[hid])
+            for hid in train_hids:
+                train_idx.extend(group_indices[hid])
+
+        # Shuffle
+        train_idx = np.array(train_idx)
+        val_idx = np.array(val_idx)
+        if len(train_idx) > 0:
+            train_idx = train_idx[np.random.permutation(len(train_idx))]
+        if len(val_idx) > 0:
+            val_idx = val_idx[np.random.permutation(len(val_idx))]
+
+        return {"train": train_idx, "val": val_idx}
     
     def save_dataset(self, dataset: Dict[str, np.ndarray], file_path: str):
         """Save dataset to file"""
