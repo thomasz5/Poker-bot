@@ -134,9 +134,11 @@ class BaselineModelTrainer:
                 'batch_size': config['batch_size'],
             })
 
-        # Try stratified split by (street, position)
+        # Try group-aware stratified split by (street, position, stack-depth bucket)
         try:
-            splits = self.processor.stratified_split_indices(dataset['metadata'], validation_split=0.2)
+            splits = self.processor.stratified_group_split_indices(
+                dataset['metadata'], validation_split=0.2, include_stack_depth=True
+            )
             train_idx = splits['train']
             val_idx = splits['val']
 
