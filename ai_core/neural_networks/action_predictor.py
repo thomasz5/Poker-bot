@@ -143,7 +143,7 @@ class ActionPredictorNetwork(nn.Module):
 class ActionPredictorTrainer:
     """Trainer for the action predictor network"""
     
-    def __init__(self, model: ActionPredictorNetwork, learning_rate: float = 0.001):
+    def __init__(self, model: ActionPredictorNetwork, learning_rate: float = 0.001, class_weights: Optional[np.ndarray] = None):
         self.model = model
         # Prefer Apple Metal (MPS) on macOS, then CUDA, then CPU
         try:
@@ -157,7 +157,11 @@ class ActionPredictorTrainer:
             self.device = torch.device("cpu")
         self.model.to(self.device)
         self.optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-        self.action_criterion = nn.CrossEntropyLoss()
+        if class_weights is not None and len(class_weights) > 0:
+            w = torch.as_tensor(class_weights, dtype=torch.float32, device=self.device)
+            self.action_criterion = nn.CrossEntropyLoss(weight=w)
+        else:
+            self.action_criterion = nn.CrossEntropyLoss()
         self.bet_criterion = nn.MSELoss()
         self.bucket_criterion = nn.CrossEntropyLoss()
         

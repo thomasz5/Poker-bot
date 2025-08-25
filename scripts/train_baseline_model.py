@@ -113,8 +113,14 @@ class BaselineModelTrainer:
             num_actions=dataset['num_actions']
         )
         
-        # Create trainer
-        trainer = ActionPredictorTrainer(model, learning_rate=config['learning_rate'])
+        # Compute class weights to mitigate imbalance (inverse frequency)
+        action_targets_arr = dataset['action_targets']
+        binc = np.bincount(action_targets_arr, minlength=dataset['num_actions'])
+        inv = 1.0 / np.maximum(binc, 1)
+        class_weights = inv * (len(binc) / inv.sum())
+
+        # Create trainer with class weights
+        trainer = ActionPredictorTrainer(model, learning_rate=config['learning_rate'], class_weights=class_weights)
         
         # Train model
         start_time = datetime.now()
@@ -128,12 +134,52 @@ class BaselineModelTrainer:
                 'batch_size': config['batch_size'],
             })
 
-        history = trainer.train(
-            dataset,
-            epochs=config['epochs'],
-            batch_size=config['batch_size'],
-            validation_split=0.2
-        )
+        # Try stratified split by (street, position)
+        try:
+            splits = self.processor.stratified_split_indices(dataset['metadata'], validation_split=0.2)
+            train_idx = splits['train']
+            val_idx = splits['val']
+
+            train_dataset = {
+                'features': dataset['features'][train_idx],
+                'action_targets': dataset['action_targets'][train_idx],
+                'amount_targets': dataset['amount_targets'][train_idx],
+            }
+            if 'bet_bucket_targets' in dataset:
+                train_dataset['bet_bucket_targets'] = dataset['bet_bucket_targets'][train_idx]
+
+            val_dataset = {
+                'features': dataset['features'][val_idx],
+                'action_targets': dataset['action_targets'][val_idx],
+                'amount_targets': dataset['amount_targets'][val_idx],
+            }
+            if 'bet_bucket_targets' in dataset:
+                val_dataset['bet_bucket_targets'] = dataset['bet_bucket_targets'][val_idx]
+
+            val_losses = []
+            val_accuracies = []
+            for epoch in range(config['epochs']):
+                train_metrics = trainer.train_epoch(train_dataset, batch_size=config['batch_size'])
+                val_metrics = trainer.evaluate(val_dataset)
+                val_losses.append(val_metrics['loss'])
+                val_accuracies.append(val_metrics['accuracy'])
+                if epoch % 10 == 0 or epoch == config['epochs'] - 1:
+                    print(f"Epoch {epoch:3d}: Train Loss {train_metrics['loss']:.4f}, Acc {train_metrics['accuracy']:.4f} | Val Loss {val_metrics['loss']:.4f}, Acc {val_metrics['accuracy']:.4f}")
+
+            history = {
+                'train_losses': trainer.train_losses,
+                'train_accuracies': trainer.train_accuracies,
+                'val_losses': val_losses,
+                'val_accuracies': val_accuracies,
+            }
+        except Exception as e:
+            # Fallback to original trainer's internal split
+            history = trainer.train(
+                dataset,
+                epochs=config['epochs'],
+                batch_size=config['batch_size'],
+                validation_split=0.2
+            )
         end_time = datetime.now()
         
         training_time = (end_time - start_time).total_seconds()
