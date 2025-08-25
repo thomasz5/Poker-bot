@@ -371,6 +371,46 @@ class DataProcessor:
         print(f"Action distribution: {np.bincount(action_targets)}")
         
         return dataset
+
+    def stratified_split_indices(self, metadata: Dict[str, Any], validation_split: float = 0.2, seed: int = 42) -> Dict[str, np.ndarray]:
+        """Create stratified train/val indices by street and position.
+
+        We form strata using (street, position) pairs, then allocate per-stratum
+        samples into train/val according to the split ratio.
+        """
+        np.random.seed(seed)
+        n = len(metadata['streets'])
+        keys = []
+        for i in range(n):
+            street = metadata['streets'][i]
+            position = metadata['positions'][i]
+            keys.append((street, position))
+
+        # group indices by key
+        from collections import defaultdict
+        groups: Dict[Any, List[int]] = defaultdict(list)
+        for idx, key in enumerate(keys):
+            groups[key].append(idx)
+
+        train_indices: List[int] = []
+        val_indices: List[int] = []
+        for key, idxs in groups.items():
+            idxs = np.array(idxs)
+            perm = np.random.permutation(len(idxs))
+            idxs = idxs[perm]
+            n_val = max(1, int(len(idxs) * validation_split)) if len(idxs) > 0 else 0
+            val_indices.extend(idxs[:n_val].tolist())
+            train_indices.extend(idxs[n_val:].tolist())
+
+        # Shuffle final lists
+        train_indices = np.array(train_indices)
+        val_indices = np.array(val_indices)
+        if len(train_indices) > 0:
+            train_indices = train_indices[np.random.permutation(len(train_indices))]
+        if len(val_indices) > 0:
+            val_indices = val_indices[np.random.permutation(len(val_indices))]
+
+        return {"train": train_indices, "val": val_indices}
     
     def save_dataset(self, dataset: Dict[str, np.ndarray], file_path: str):
         """Save dataset to file"""
