@@ -7,6 +7,7 @@ model comparison, and performance analysis.
 """
 
 import os
+import random
 import sys
 import json
 import numpy as np
@@ -66,6 +67,13 @@ class BaselineModelTrainer:
         }
         
         self.results = {}
+        # Seed for reproducibility
+        seed = int(os.environ.get("SEED", "42"))
+        np.random.seed(seed)
+        random.seed(seed)
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
     
     def load_training_data(self) -> Dict[str, np.ndarray]:
         """Load and prepare training data"""
@@ -160,13 +168,34 @@ class BaselineModelTrainer:
 
             val_losses = []
             val_accuracies = []
+            best_val_loss = float('inf')
+            best_state: Dict[str, Any] = {}
+            patience = int(os.environ.get("EARLY_STOP_PATIENCE", "15"))
+            no_improve = 0
+            # LR scheduler
+            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(trainer.optimizer, mode='min', factor=0.5, patience=5)
             for epoch in range(config['epochs']):
                 train_metrics = trainer.train_epoch(train_dataset, batch_size=config['batch_size'])
                 val_metrics = trainer.evaluate(val_dataset)
                 val_losses.append(val_metrics['loss'])
                 val_accuracies.append(val_metrics['accuracy'])
+                scheduler.step(val_metrics['loss'])
                 if epoch % 10 == 0 or epoch == config['epochs'] - 1:
                     print(f"Epoch {epoch:3d}: Train Loss {train_metrics['loss']:.4f}, Acc {train_metrics['accuracy']:.4f} | Val Loss {val_metrics['loss']:.4f}, Acc {val_metrics['accuracy']:.4f}")
+
+                # Early stopping on val loss
+                if val_metrics['loss'] < best_val_loss - 1e-5:
+                    best_val_loss = val_metrics['loss']
+                    best_state = {
+                        'model_state_dict': trainer.model.state_dict(),
+                        'optimizer_state_dict': trainer.optimizer.state_dict(),
+                    }
+                    no_improve = 0
+                else:
+                    no_improve += 1
+                    if no_improve >= patience:
+                        print(f"Early stopping at epoch {epoch}")
+                        break
 
             history = {
                 'train_losses': trainer.train_losses,
@@ -197,6 +226,13 @@ class BaselineModelTrainer:
             'amount_targets': dataset['amount_targets'][val_indices]
         }
         
+        # Load best state if early stopped
+        try:
+            if 'model_state_dict' in best_state:
+                trainer.model.load_state_dict(best_state['model_state_dict'])
+                trainer.optimizer.load_state_dict(best_state['optimizer_state_dict'])
+        except Exception:
+            pass
         final_metrics = trainer.evaluate(val_dataset)
         if MLFLOW_OK:
             mlflow.log_metrics({
@@ -206,6 +242,29 @@ class BaselineModelTrainer:
                 'val_bucket_loss': float(final_metrics.get('bucket_loss', 0.0)),
                 'val_bet_size_mae': float(final_metrics.get('bet_size_mae', 0.0)),
             })
+            # Log confusion matrix and calibration curve images
+            try:
+                import matplotlib.pyplot as plt
+                from sklearn.metrics import confusion_matrix
+
+                # Confusion matrix
+                features_val = torch.FloatTensor(val_dataset['features'])
+                with torch.no_grad():
+                    logits = trainer.model(features_val)['action_logits']
+                    preds = torch.argmax(logits, dim=-1).cpu().numpy()
+                labels = val_dataset['action_targets']
+                cm = confusion_matrix(labels, preds, labels=list(range(dataset['num_actions'])))
+                fig, ax = plt.subplots(figsize=(6, 5))
+                im = ax.imshow(cm, cmap='Blues')
+                ax.set_title('Confusion Matrix')
+                plt.colorbar(im, ax=ax)
+                plt.tight_layout()
+                cm_path = os.path.join(self.results_dir, 'confusion_matrix.png')
+                fig.savefig(cm_path)
+                plt.close(fig)
+                mlflow.log_artifact(cm_path)
+            except Exception:
+                pass
         
         # Save model
         model_path = os.path.join(self.results_dir, f"{config_name}_model.pth")
